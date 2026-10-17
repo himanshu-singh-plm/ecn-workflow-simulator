@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Engineering Change Workflow Simulator (ECR, ECN, ECO)</title>
+<meta name="description" content="Interactive simulator of a PLM engineering change process with role-based approvals and an audit trail. Sample data only.">
+<style>
+:root{--paper:#f4f6f8;--card:#fff;--ink:#15212c;--muted:#53606c;--rule:#c7d1da;--accent:#1c5bb8;--soft:#e3edfa;--ok:#1b7a43;--bad:#b3261e}
+@media (prefers-color-scheme:dark){:root{--paper:#0f161d;--card:#16202a;--ink:#e8eef4;--muted:#9aa8b5;--rule:#2b3945;--accent:#6aa5f0;--soft:#17304f;--ok:#5fd08a;--bad:#ff8a80}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:32px 20px 64px}
+h1{font:600 clamp(1.6rem,4vw,2.3rem)/1.2 Georgia,serif;margin:0 0 6px}
+h2{font:600 1.15rem Georgia,serif;margin:0 0 12px}
+.lead{color:var(--muted);max-width:70ch;margin:0 0 20px}
+.bar{display:flex;flex-wrap:wrap;gap:16px;align-items:end;border:2px solid var(--ink);background:var(--card);padding:14px 16px;margin-bottom:20px}
+label{display:block;font-size:.85rem;color:var(--muted)}
+select,input,textarea,button{font:inherit;color:var(--ink)}
+select,input,textarea{background:var(--paper);border:1px solid var(--rule);border-radius:4px;padding:8px 10px;width:100%}
+button{cursor:pointer;border:2px solid var(--accent);background:transparent;color:var(--accent);border-radius:4px;padding:6px 12px;font-weight:600}
+button.primary{background:var(--accent);color:var(--paper)}
+button:disabled{opacity:.4;cursor:not-allowed}
+button.bad{border-color:var(--bad);color:var(--bad)}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.stats{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px}
+.stat{background:var(--soft);padding:6px 12px;border-radius:4px;font-weight:500}
+form{display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px;background:var(--card);border:1px solid var(--rule);padding:16px;margin-bottom:28px}
+form .full{grid-column:1/-1}
+.card{background:var(--card);border:1px solid var(--rule);border-left:5px solid var(--accent);padding:16px;margin-bottom:14px}
+.card.rejected{border-left-color:var(--bad)}.card.released{border-left-color:var(--ok)}
+.head{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 14px}
+.id{font-weight:700}.meta{color:var(--muted);font-size:.9rem}
+.badge{font-weight:600;padding:2px 10px;border-radius:12px;background:var(--soft)}
+.steps{display:flex;gap:4px;margin:12px 0}
+.steps span{flex:1;height:6px;background:var(--rule);border-radius:3px}
+.steps span.on{background:var(--accent)}
+.card.released .steps span.on{background:var(--ok)}
+.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+details{margin-top:10px;color:var(--muted);font-size:.9rem}
+summary{cursor:pointer;color:var(--accent)}
+ol{margin:8px 0 0;padding-left:20px}
+.empty{padding:20px;border:1px dashed var(--rule);color:var(--muted)}
+@media (max-width:640px){form{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main class="wrap">
+<h1>Engineering Change Workflow Simulator</h1>
+<p class="lead">A small model of the PLM change process: a change request (ECR) is reviewed, approved, issued as a change notice (ECN), implemented as an order (ECO) and released. Each step is limited by role and written to an audit trail. All data here is sample data.</p>
+
+<section class="bar" aria-label="Controls">
+  <div style="min-width:200px"><label for="role">Acting as</label>
+    <select id="role"><option>Requestor</option><option>CCB</option><option>Change Analyst</option><option>Release Manager</option></select></div>
+  <div style="min-width:200px"><label for="filter">Show</label>
+    <select id="filter"><option value="all">All changes</option></select></div>
+  <button id="reset" type="button">Reset sample data</button>
+</section>
+
+<div class="stats" id="stats" aria-live="polite"></div>
+
+<h2>Raise a change request</h2>
+<form id="form">
+  <div><label for="title">Title</label><input id="title" required maxlength="80" placeholder="e.g. Replace fastener on bracket"></div>
+  <div><label for="item">Affected item</label><input id="item" required maxlength="40" placeholder="e.g. BRK-2041 Rev B"></div>
+  <div><label for="prio">Priority</label><select id="prio"><option>Low</option><option selected>Medium</option><option>High</option></select></div>
+  <div class="full"><label for="desc">Reason for change</label><textarea id="desc" rows="2" maxlength="300"></textarea></div>
+  <div class="full"><button class="primary" type="submit">Create ECR (as Requestor)</button></div>
+</form>
+
+<h2>Changes</h2>
+<div id="list"></div>
+</main>
+
+<script>
+const STAGES=[
+ {k:"draft",n:"ECR draft"},{k:"review",n:"ECR in review"},{k:"approved",n:"ECR approved"},
+ {k:"ecn",n:"ECN issued"},{k:"eco",n:"ECO in progress"},{k:"released",n:"Released"}];
+const REJ={k:"rejected",n:"ECR rejected"};
+const NEXT={
+ draft:[{to:"review",label:"Submit for review",role:"Requestor"}],
+ review:[{to:"approved",label:"Approve",role:"CCB"},{to:"rejected",label:"Reject",role:"CCB",bad:1}],
+ approved:[{to:"ecn",label:"Issue ECN",role:"Change Analyst"}],
+ ecn:[{to:"eco",label:"Start ECO",role:"Change Analyst"}],
+ eco:[{to:"released",label:"Release change",role:"Release Manager"}],
+ rejected:[{to:"draft",label:"Reopen as draft",role:"Requestor"}],
+ released:[]};
+const KEY="ecn-sim-v1";
+const label=k=>(k==="rejected"?REJ:STAGES.find(s=>s.k===k)).n;
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const now=()=>new Date().toLocaleString();
+
+function seed(){
+ const h=(a,w,r)=>({t:now(),a,w,r});
+ return [
+  {id:"ECR-001",title:"Replace M6 bolt with M8 on bracket",item:"BRK-2041 Rev B",prio:"High",desc:"Field failures under vibration.",stage:"review",log:[h("Created ECR","Requestor"),h("Submitted for review","Requestor")]},
+  {id:"ECR-002",title:"Update supplier on seal kit",item:"SEAL-110 Rev A",prio:"Medium",desc:"Supplier lead time exceeds 12 weeks.",stage:"eco",log:[h("Created ECR","Requestor"),h("Submitted for review","Requestor"),h("Approved","CCB"),h("ECN issued","Change Analyst"),h("ECO started","Change Analyst")]},
+  {id:"ECR-003",title:"Change housing colour",item:"HSG-300 Rev C",prio:"Low",desc:"Cosmetic request.",stage:"rejected",log:[h("Created ECR","Requestor"),h("Submitted for review","Requestor"),h("Rejected: no business case","CCB")]}];
+}
+const openIds=new Set();
+let data;
+try{data=JSON.parse(localStorage.getItem(KEY))}catch(e){data=null}
+if(!Array.isArray(data))data=seed();
+const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(data))}catch(e){}};
+
+const $=id=>document.getElementById(id);
+const filter=$("filter");
+[...STAGES,REJ].forEach(s=>{const o=document.createElement("option");o.value=s.k;o.textContent=s.n;filter.appendChild(o)});
+
+function act(id,to,lbl){
+ const c=data.find(x=>x.id===id);if(!c)return;
+ let note=lbl;
+ if(to==="rejected"){const r=prompt("Reason for rejection?");if(r===null)return;note="Rejected: "+(r.trim()||"no reason given")}
+ c.stage=to;c.log.push({t:now(),a:note,w:$("role").value});save();render();
+}
+
+function render(){
+ const role=$("role").value,f=filter.value;
+ const count=k=>data.filter(c=>c.stage===k).length;
+ $("stats").innerHTML=`<span class="stat">${data.length} total</span><span class="stat">${count("review")} awaiting CCB</span><span class="stat">${count("eco")} ECO in progress</span><span class="stat">${count("released")} released</span>`;
+ const rows=data.filter(c=>f==="all"||c.stage===f);
+ const list=$("list");
+ if(!rows.length){list.innerHTML='<div class="empty">No changes match this filter.</div>';return}
+ list.innerHTML=rows.slice().reverse().map(c=>{
+  const idx=STAGES.findIndex(s=>s.k===c.stage);
+  const steps=STAGES.map((s,i)=>`<span class="${i<=idx?"on":""}" title="${s.n}"></span>`).join("");
+  const btns=NEXT[c.stage].map(n=>{
+   const ok=n.role===role;
+   return `<button type="button" class="${n.bad?"bad":""}" data-id="${c.id}" data-to="${n.to}" data-l="${n.label}" ${ok?"":"disabled"} title="${ok?"":"Needs role: "+n.role}">${n.label}</button>`}).join("");
+  const need=NEXT[c.stage].length&&!NEXT[c.stage].some(n=>n.role===role)?`<span class="meta">Waiting for: ${NEXT[c.stage].map(n=>n.role)[0]}</span>`:"";
+  return `<article class="card ${c.stage}">
+   <div class="head"><div><span class="id">${c.id}</span> &middot; ${esc(c.title)}</div><span class="badge">${label(c.stage)}</span></div>
+   <div class="meta">${esc(c.item)} &middot; ${c.prio} priority</div>
+   ${c.desc?`<p style="margin:6px 0 0">${esc(c.desc)}</p>`:""}
+   ${c.stage==="rejected"?"":`<div class="steps" aria-hidden="true">${steps}</div>`}
+   <div class="actions">${btns}${need}</div>
+   <details data-id="${c.id}" ${openIds.has(c.id)?"open":""}><summary>Audit trail (${c.log.length})</summary><ol>${c.log.map(l=>`<li>${esc(l.a)}, by ${l.w} (${l.t})</li>`).join("")}</ol></details>
+  </article>`}).join("");
+}
+
+$("list").addEventListener("click",e=>{const b=e.target.closest("button[data-id]");if(b&&!b.disabled)act(b.dataset.id,b.dataset.to,b.dataset.l)});
+$("list").addEventListener("toggle",e=>{const d=e.target;if(d.tagName==="DETAILS"){d.open?openIds.add(d.dataset.id):openIds.delete(d.dataset.id)}},true);
+$("role").addEventListener("change",render);filter.addEventListener("change",render);
+$("reset").addEventListener("click",()=>{data=seed();save();render()});
+$("form").addEventListener("submit",e=>{
+ e.preventDefault();
+ const n=String(Math.max(0,...data.map(c=>parseInt(c.id.slice(4),10)))+1).padStart(3,"0");
+ data.push({id:"ECR-"+n,title:$("title").value.trim(),item:$("item").value.trim(),prio:$("prio").value,desc:$("desc").value.trim(),stage:"draft",log:[{t:now(),a:"Created ECR",w:"Requestor"}]});
+ e.target.reset();save();render();
+});
+render();
+</script>
+</body>
+</html>
