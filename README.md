@@ -2,7 +2,7 @@
 
 An interactive model of a PLM engineering change process (ECR, ECN, ECO), built with plain HTML, CSS and JavaScript. No install or build step.
 
-**Live demo:** https://YOUR-USERNAME.github.io/ecn-workflow-simulator/
+**Live demo:** https://himanshu-singh-plm.github.io/ecn-workflow-simulator/
 
 ## What it shows
 - Change lifecycle: ECR draft, ECR review, ECR approved, ECN issued, ECO in progress, released (with a reject and reopen loop)
